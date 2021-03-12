@@ -125,17 +125,20 @@ def validate_dining_suggestion(location, cuisine, time, date, numberOfPeople, ph
             # Outside of business hours
             return build_validation_result(False, 'Time', 'Our business hours are from 10 AM. to 11 PM. Can you specify a time during this range?')
     
-    if numberOfPeople is not None and not numberOfPeople.isnumeric():
-        return build_validation_result(False,
-                                       'NumberOfPeople',
-                                       'That does not look like a valid number {}, '
-                                       'Could you please repeat?'.format(numberOfPeople))
+    if numberOfPeople is not None:
+        numberOfPeople = int(numberOfPeople)
+        if numberOfPeople > 20 or numberOfPeople <= 0:
+            return build_validation_result(False,
+            'NumberOfPeople',
+            'That does not look like a valid number {}, '
+            'It should be less than 20'.format(numberOfPeople))
     
     if phoneNumber is not None and not phoneNumber.isnumeric():
-        return build_validation_result(False,
-                                       'PhoneNumber',
-                                       'That does not look like a valid number {}, '
-                                       'Could you please repeat? '.format(phoneNumber))    
+        if len(phoneNumber) != 10:
+            return build_validation_result(False,
+                                           'PhoneNumber',
+                                           'That does not look like a valid number {}, '
+                                           'Could you please repeat? '.format(phoneNumber))    
     return build_validation_result(True, None, None)
 
 
@@ -190,10 +193,9 @@ def diningSuggestions(intent_request,context):
                   'content': 'Thank you for the information, we are generating our recommendations, we will send the recommendations to your phone when they are generated'})
 
 def sendSQSMessage(requestData):
-    
+    queue_url = 'https://sqs.us-east-1.amazonaws.com/089149523310/Cloudqueue'
     sqs = boto3.client('sqs', region_name='us-east-1')
-    queue = sqs.get_queue_url(QueueName='queue_name')
-    queue = sqs.get_queue_by_name(QueueName='Cloudqueue')
+
     
     messageAttributes = {
         'Cuisine': {
@@ -230,7 +232,9 @@ def sendSQSMessage(requestData):
     #print mesAtrributes
     print(messageBody)
     
-    response = queue.send_message(
+    response = sqs.send_message(
+        QueueUrl=queue_url,
+        DelaySeconds=10,
         MessageAttributes = messageAttributes,
         MessageBody = messageBody
         )

@@ -37,11 +37,11 @@ for cuisine in cuisines:
             response = requests.get(yelp_rest_endpoint, data=payload, headers=headers, params=querystring)
             message = json.loads(response.text)
             print(message)
-            result = message['businesses']
-            resultData = resultData + result
-            # print(resultData)
-    # dynamoInsert(resultData)
-    # addElasticIndex(resultData)
+            try:
+                result = message['businesses']
+                resultData = resultData + result
+            except:
+                pass
 
 
 
@@ -90,7 +90,7 @@ host = 'search-cloud-elastic-search-ybmh47fjqd7qokijii7kfebh74.us-east-1.es.amaz
 # awsauth = AWS4Auth(credentials.access_key, credentials.secret_key, 'us-east-1', 'es', session_token=credentials.token)
 es = Elasticsearch(
     hosts = [{'host': host, 'port': 443}],
-    http_auth = ('ig2229', 'Elastic@12345'),
+    http_auth = ('username', 'password'),
     use_ssl = True,
     verify_certs = True,
     connection_class = RequestsHttpConnection

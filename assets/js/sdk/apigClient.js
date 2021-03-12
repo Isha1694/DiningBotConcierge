@@ -40,7 +40,7 @@ apigClientFactory.newClient = function (config) {
         config.sessionToken = '';
     }
     if(config.region === undefined) {
-        config.region = 'us-east-2';
+        config.region = 'us-east-1';
     }
     //If defaultContentType is not defined then default to application/json
     if(config.defaultContentType === undefined) {
@@ -53,7 +53,7 @@ apigClientFactory.newClient = function (config) {
 
     
     // extract endpoint and path from url
-    var invokeUrl = 'https://x3h4v53ade.execute-api.us-east-2.amazonaws.com/AssignStage';
+    var invokeUrl = 'https://nnu37ktl99.execute-api.us-east-1.amazonaws.com/AssignmentStage';
     var endpoint = /(^https?:\/\/[^\/]+)/g.exec(invokeUrl)[1];
     var pathComponent = invokeUrl.substring(endpoint.length);
 

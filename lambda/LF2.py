@@ -1,119 +1,112 @@
 import json
 import boto3
-from botocore.exceptions import ClientError
 from elasticsearch import Elasticsearch, RequestsHttpConnection
 from requests_aws4auth import AWS4Auth
-from boto3.dynamodb.conditions import Key, Attr
-import random
-import logging
-
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-
-def lambda_handler(event, context):
-    sqsclient = boto3.client('sqs')
-    queue_url = 'https://sqs.us-east-1.amazonaws.com/006767371987/SuggestionsQueue'
-
-    # Receive message from SQS queue
-    response = sqsclient.receive_message(
-        QueueUrl=queue_url,
-        AttributeNames=[
-            'SequenceNumber'
-        ],
-        MaxNumberOfMessages=1,
-        MessageAttributeNames=[
-            'All'
-        ],
-        VisibilityTimeout=0,
-        WaitTimeSeconds=1
-    )
-    logger.debug(response)
-    
-    if 'Messages' in response:
-        host = 'search-restaurants-index-xir27i3go3jm4flytc7b6srx7m.us-east-1.es.amazonaws.com'
-        credentials = boto3.Session().get_credentials()
-        awsauth = AWS4Auth(credentials.access_key, credentials.secret_key, 'us-east-1', 'es', session_token=credentials.token)
-        es = Elasticsearch(
-            hosts = [{'host': host, 'port': 443}],
-            http_auth = awsauth,
-            use_ssl = True,
-            verify_certs = True,
+TABLE_NAME = 'yelp-restaurants'
+SAMPLE_N = '5'
+host = 'https://search-cloud-elastic-search-ybmh47fjqd7qokijii7kfebh74.us-east-1.es.amazonaws.com'
+queue_url = 'https://sqs.us-east-1.amazonaws.com/089149523310/Cloudqueue'
+# credentials = boto3.Session().get_credentials()
+# awsauth = AWS4Auth(credentials.access_key, credentials.secret_key, 'us-east-1', 'es',session_token=credentials.token)
+sqsclient = boto3.client('sqs',region_name='us-east-1')
+es = Elasticsearch(
+            host,
+            http_auth = ('username', 'password'),
             connection_class = RequestsHttpConnection
-        )
+            )
+#check = es.get(index="restaurants", doc_type="Restaurant", id='-KahGyU9G7JT0JmoC_Yc0Q')
+#print(check)
 
-        dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-        table = dynamodb.Table('yelp-restaurants')
 
-        for message in response['Messages']:
-            receipt_handle = message['ReceiptHandle']
-            req_attributes = message['MessageAttributes']
-            print req_attributes
+def sendsms(number, message):
+    send_sms = boto3.client('sns',region_name='us-east-1')
+    smsattrs = {
+        'AWS.SNS.SMS.SenderID': {
+            'DataType': 'String',
+            'StringValue': 'TestSender'
+        },
+        'AWS.SNS.SMS.SMSType': {
+            'DataType': 'String',
+            'StringValue': 'Transactional'  # change to Transactional from Promotional for dev
+        }
+    }
+    response = send_sms.publish(
+        PhoneNumber=number,
+        Message=message,
+        MessageAttributes=smsattrs
+    )
+    print(number)
+    print(response)
+    print("The message is: ", message)
 
-            index_category = req_attributes['Cuisine']['StringValue']
 
-            searchData = es.search(index="restaurants", body={
-                                        "query": {
-                                        "match": {
-                                        "categories.title": index_category
-                                        }}})
+def search(cuisine):
+    data = es.search(index="restaurants", body={"query": {"match": {'categories.title':cuisine}}})
+    print(data)
+    print("search complete", data['hits']['hits'])
+    return data['hits']['hits']
 
-            restaurantIds = []
-            for hit in searchData['hits']['hits']:
-                restaurantIds.append(hit['_source']['id'])
 
-            randomRestaurantIds = random.sample(restaurantIds, k=3)
-            logger.debug("restaurantIds - %s", randomRestaurantIds)
+def get_restaurant_data(ids):
+    dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+    table = dynamodb.Table('yelp-restaurants')
+    ans = 'Hi! Here are your suggestions,\n '
+    i = 1
+    for id in ids:
+        if i<6:
+            response = table.get_item(
+                Key={
+                    'id': id
+                }
+            )
+            print(response)
+            response_item = response['Item']
+            print(response_item)
+            restaurant_name = response_item['name']
+            restaurant_address = response_item['address']
+            # restaurant_city = response_item['city:']
+            restaurant_zipcode = response_item['zip_code']
+            restaurant_rating = str(response_item['rating'])
+            ans += "{}. {}, located at {}\n".format(i, restaurant_name, restaurant_address)
+            # return ans
+            i += 1
+        else:
+            break
+    print("db pass")
+    return ans # string type
 
-            getMessageContent = getDynamoDbData(table, req_attributes, randomRestaurantIds)
-            sendMessageToUser(req_attributes, getMessageContent)
 
-            sqsclient.delete_message(
+def lambda_handler(event=None, context=None):
+    messages = sqsclient.receive_message(QueueUrl=queue_url, MessageAttributeNames=['All'])
+    print(messages)
+    try:
+        message = messages['Messages'][0]
+        receipt_handle = message['ReceiptHandle']
+        req_attributes = message['MessageAttributes']
+        print(req_attributes)
+        cuisine = req_attributes['Cuisine']['StringValue']
+        location = req_attributes['Location']['StringValue']
+        dining_date = req_attributes['DiningDate']['StringValue']
+        dining_time = req_attributes['DiningTime']['StringValue']
+        num_people = req_attributes['PeopleNum']['StringValue']
+        phone = req_attributes['PhoneNum']['StringValue']
+        print(location, cuisine, dining_date, dining_time, num_people, phone)
+        print(phone)
+        ids = search(cuisine)
+        ids = list(map(lambda x: x['_id'], ids))
+        print(ids)
+        rest_details = get_restaurant_data(ids)
+        sendsms("+1"+phone, rest_details)
+        sqsclient.delete_message(
                 QueueUrl=queue_url,
                 ReceiptHandle=receipt_handle
             )
-            
-            print searchData['hits']['total']
-
-
-    else:
-        return {
-        'statusCode': 500,
-        'body': json.dumps('Error fetching data from the queue.')
-    }
-    
+    except Exception as e:
+        print(e)
     return {
         'statusCode': 200,
-        'body': response
+        'body': json.dumps('Hello from Lambda LF2!')
     }
 
-def getDynamoDbData(table, requestData, businessIds):
-    if len(businessIds) <= 0:
-        return 'We can not find any restaurant under this description, please try again.'
 
-    textString = "Hello! Here are my " + requestData['Categories']['StringValue'] + " restaurant suggestions for " + requestData['PeopleNum']['StringValue'] +" people, for " + requestData['DiningDate']['StringValue'] + " at " + requestData['DiningTime']['StringValue'] + ":"
-    count = 1
-    
-    for business in businessIds:
-        responseData = table.query(KeyConditionExpression=Key('id').eq(business))
-        if responseData and len(responseData['Items']) >= 1:
-            print responseData
-            responseData = responseData['Items'][0]
-            address = responseData['address'] 
-            textString = textString + ", " + str(count) + ". " + str(responseData['name']) + ", located at " + str(address[0]) + " " + str(address[1])
-            count+=1
-    return textString
-
-def sendMessageToUser(requestData, content):
-    
-    try:
-        client = boto3.client('sns', region_name= 'us-east-1')
-        response = client.publish(
-            TopicArn = 'arn:aws:sns:us-east-1:006767371987:DiningSuggestions',
-            #PhoneNumber=requestData['PhoneNum']['StringValue'],
-            Message= content,
-            MessageStructure='string'
-        )
-    except KeyError:
-        logger.debug("Error sending ")
-    logger.debug("response - %s",json.dumps(response) )
-    logger.debug("Message = '%s' Phone Number = %s" % (content, requestData['PhoneNum']['StringValue']))
+lambda_handler()
